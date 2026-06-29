@@ -1,0 +1,66 @@
+{
+  "dataset": "hillstrom",
+  "seed": 42,
+  "n_rows": 64000,
+  "n_holdout": 19200,
+  "balance": {
+    "n_features": 18,
+    "n_flagged": 0,
+    "max_abs_smd": 0.01532062835726887,
+    "mean_abs_smd": 0.0053663000231685765,
+    "treatment_ratio": 0.66709375,
+    "passed": true
+  },
+  "best_learner": "s_learner",
+  "learners": {
+    "s_learner": {
+      "qini": 0.02345074195509459,
+      "auuc": 0.013233266522584816,
+      "top_decile_uplift": 0.08896299215347855,
+      "bottom_decile_uplift": 0.05147915210808292,
+      "ranks_correctly": true
+    },
+    "t_learner": {
+      "qini": 0.020045744443878348,
+      "auuc": 0.01128785823599265,
+      "top_decile_uplift": 0.07891508791059018,
+      "bottom_decile_uplift": 0.059375,
+      "ranks_correctly": true
+    },
+    "x_learner": {
+      "qini": 0.022286405367101872,
+      "auuc": 0.013099522498925379,
+      "top_decile_uplift": 0.07167554434165033,
+      "bottom_decile_uplift": 0.06178669570691862,
+      "ranks_correctly": true
+    },
+    "r_learner": {
+      "qini": -0.0006658655340478,
+      "auuc": -0.0006241008956101108,
+      "top_decile_uplift": 0.06943211323711473,
+      "bottom_decile_uplift": 0.0762425188654697,
+      "ranks_correctly": false
+    }
+  },
+  "decision_demo": {
+    "budget": 5760,
+    "cost_per_contact": 0.1,
+    "value_per_conversion": 10.0,
+    "uplift": {
+      "incremental_conversions": 407.81141757696093,
+      "incremental_profit": 3502.1141757696096
+    },
+    "propensity": {
+      "incremental_conversions": 326.84840445319116,
+      "incremental_profit": 2692.4840445319114
+    },
+    "random": {
+      "incremental_conversions": 316.7625365560792,
+      "incremental_profit": 2591.6253655607925
+    },
+    "profit_lift_vs_propensity": 809.6301312376982,
+    "profit_lift_vs_random": 910.4888102088171
+  },
+  "why_not_accuracy": "Accuracy/AUC measure outcome prediction, not treatment effect. Under the fundamental problem of causal inference only one potential outcome is observed per customer, so individual uplift has no ground-truth label. Uplift is therefore evaluated at the group level on a randomized holdout via Qini/AUUC, never accuracy/AUC (FR-D1).",
+  "elapsed_sec": 5.0
+}

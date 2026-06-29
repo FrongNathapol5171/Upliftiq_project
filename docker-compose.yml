@@ -1,0 +1,48 @@
+# UpliftIQ — one-command demo:  docker compose up --build
+# Flow: `train` runs the seeded pipeline once -> writes artifacts to the shared
+# volume -> `api` serves them -> `web` is the simulator. (NFR-5)
+services:
+  # One-shot: produce scores/models/reports for the demo dataset, then exit.
+  train:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file: [.env]
+    environment:
+      DEFAULT_DATASET: ${DEFAULT_DATASET:-hillstrom}
+      SEED: ${SEED:-42}
+    volumes:
+      - artifacts:/app/artifacts
+      - ./models:/app/models
+      - ./scores:/app/scores
+      - ./reports:/app/reports
+      - ./.uplift_data:/app/.uplift_data
+    command: >
+      python -m pipeline.run --dataset ${DEFAULT_DATASET:-hillstrom} --seed ${SEED:-42}
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file: [.env]
+    ports: ["8000:8000"]
+    volumes:
+      - ./models:/app/models
+      - ./scores:/app/scores
+      - ./reports:/app/reports
+      - ./.uplift_data:/app/.uplift_data
+    depends_on:
+      train:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+    ports: ["3000:3000"]
+    depends_on: [api]
+
+volumes:
+  artifacts:
