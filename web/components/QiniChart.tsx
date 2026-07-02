@@ -2,11 +2,14 @@
 import * as React from "react";
 import { Card, CardContent, Typography, Box } from "@mui/material";
 import { LineChart } from "@mui/x-charts/LineChart";
-import { series } from "@/theme";
+import { policySeries } from "@/theme";
+import { useResolvedMode } from "@/lib/useResolvedMode";
 import type { Point } from "@/lib/api";
 
 export default function QiniChart({ points }: { points: Point[] }) {
+  const mode = useResolvedMode();
   if (!points?.length) return null;
+  const colors = policySeries(mode);
   const x = points.map((p) => p.x);
   const model = points.map((p) => p.y);
   const last = model[model.length - 1] ?? 0;
@@ -26,13 +29,16 @@ export default function QiniChart({ points }: { points: Point[] }) {
           <LineChart
             height={280}
             xAxis={[{ data: x, label: "Fraction of population targeted", min: 0, max: 1 }]}
-            yAxis={[{ label: "Cumulative incremental" }]}
             series={[
-              { data: model, label: "Uplift model", color: series.uplift, showMark: false, curve: "monotoneX" },
-              { data: random, label: "Random", color: series.random, showMark: false, curve: "linear" },
+              { id: "model", data: model, label: "Uplift model", color: colors.uplift, showMark: false, curve: "monotoneX" },
+              { id: "random", data: random, label: "Random", color: colors.random, showMark: false, curve: "linear" },
             ]}
             grid={{ horizontal: true }}
-            margin={{ left: 70 }}
+            margin={{ left: 55 }}
+            sx={{
+              "& .MuiLineElement-series-model": { strokeWidth: 2.5 },
+              "& .MuiLineElement-series-random": { strokeDasharray: "6 4", strokeWidth: 1.5 },
+            }}
           />
         </Box>
       </CardContent>

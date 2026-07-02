@@ -9,9 +9,11 @@ import pandas as pd  # noqa: E402
 
 from . import config  # noqa: E402
 
+# Validated chart palette (dataviz-checked): uplift = brand hero, propensity =
+# blue categorical, random = muted dashed reference line.
 BRAND = "#e86020"
-BASELINE = "#5f6368"
-RANDOM = "#b0b3b8"
+BASELINE = "#2a78d6"
+RANDOM = "#898781"
 
 
 def _fig_qini(points: dict, path) -> None:
@@ -34,7 +36,7 @@ def _fig_sweep(sweep: list[dict], path) -> None:
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(df["budget"], df["uplift"], color=BRAND, lw=2.5, label="Uplift targeting")
     ax.plot(df["budget"], df["propensity"], color=BASELINE, lw=2, label="Propensity")
-    ax.plot(df["budget"], df["random"], color=RANDOM, lw=2, ls="--", label="Random")
+    ax.plot(df["budget"], df["random"], color=RANDOM, lw=1.8, ls="--", label="Random")
     ax.set_xlabel("Budget (customers contacted)")
     ax.set_ylabel("Incremental profit")
     ax.set_title("Incremental profit vs budget (headline, AC-3)")

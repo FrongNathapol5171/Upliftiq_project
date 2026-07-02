@@ -3,7 +3,7 @@
 **Project:** UpliftIQ — Incremental Targeting Decision Engine
 **Document Type:** Software / Technical Specification (Architecture & Design)
 **Version:** 1.0
-**Status:** Draft for Implementation Hand-off
+**Status:** Final — Ready for Implementation
 **Companion:** `UpliftIQ_01_REQUIREMENT_SPEC.md`
 **Audience:** AI Coding Agent
 **Author:** Nathapol Powpadetkarn (Frong)
@@ -12,381 +12,294 @@
 
 ## 0. How to Use This Document (note to the coding agent)
 
-Build in the **MVP order** of §13. The **modeling + evaluation pipeline (§10) is the thesis core** — get the benchmark and the Qini/AUUC report correct first; the API, simulator, and dashboard wrap it. Never report accuracy/AUC as the primary uplift metric (FR-D1). Every requirement ID maps back to `UpliftIQ_01_REQUIREMENT_SPEC.md`.
+Build in the **MVP order given in §13**. The **modeling + evaluation pipeline (§5–§6) is the thesis core** — get the benchmark and the Qini/AUUC reporting correct and reproducible *before* polishing the API, simulator, or dashboard. Never surface accuracy/AUC as a primary metric anywhere in the stack (requirement `FR-D1`). Every requirement ID referenced below maps back to `UpliftIQ_01_REQUIREMENT_SPEC.md`.
 
 ---
 
 ## 1. Architecture Overview
 
-Three planes: **train** (offline benchmark), **serve** (scoring + decision API), **experience** (simulator PWA + Power BI).
+Three planes, cleanly separated so the statistical core can be validated independently of the UI:
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│  EXPERIENCE PLANE                                           │
-│  Next.js PWA — Campaign Simulator (budget slider, charts)   │
-│  Power BI — uplift segments, Qini, profit-vs-baseline       │
-└───────────────┬────────────────────────────────────────────┘
-                │  HTTPS / JSON
-┌───────────────▼────────────────────────────────────────────┐
-│  SERVE PLANE  (FastAPI)                                     │
-│   /score   → uplift score + segment per customer            │
-│   /simulate→ budget,cost,value → selection + incremental    │
-│              profit + baseline comparison                   │
-│   /batch   → ranked target list (CSV UTF-8 BOM)             │
-│   loads ◄── trained model artifact + precomputed scores     │
-└───────────────┬────────────────────────────────────────────┘
-                │
-┌───────────────▼────────────────────────────────────────────┐
-│  TRAIN PLANE  (Python batch — THESIS CORE)                 │
-│  ingest ▸ balance-check ▸ meta-learners (S/T/X + CForest)  │
-│  ▸ Qini/AUUC/decile/calibration ▸ pick best ▸ persist      │
-│  data via DuckDB/Parquet · models via causalml/EconML/sklift│
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────┐      ┌──────────────────────────┐      ┌───────────────────────┐
+│   TRAIN PLANE (offline)  │      │   SERVE PLANE (API)       │      │  EXPERIENCE PLANE      │
+│                          │      │                            │      │                       │
+│  sklift dataset loaders  │─────▶│  FastAPI: /benchmark       │◀────▶│  Next.js + MUI PWA    │
+│  → preprocessing         │      │           /score            │      │  - Benchmark view     │
+│  → meta-learner fitting  │      │           /decision         │      │  - Qini charts        │
+│  → Qini/AUUC evaluation  │      │           /export           │      │  - Budget simulator   │
+│  → persisted model       │      │                            │      │  - Target list grid   │
+│    artifacts (joblib)    │      │  (Python, same process     │      │  (calls the API only) │
+│                          │      │   or container as train)   │      │                       │
+└─────────────────────────┘      └──────────────────────────┘      └───────────────────────┘
+```
+
+**Why two services, not one:** the uplift models are Python-native artifacts (scikit-learn/causalml/econml objects). Next.js cannot load or run them directly. FastAPI is the *only* place model training/scoring happens; the frontend only ever talks to it over HTTP.
+
+---
+
+## 2. Tech Stack
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Modeling language | Python 3.11+ | |
+| Uplift library | `scikit-uplift` (`sklift`) | dataset loaders + Qini/AUUC metrics |
+| Meta-learner library | `causalml` or `econml` | pick one; `causalml` has simpler S/T/X-learner APIs |
+| Backend framework | FastAPI | async, auto-generates OpenAPI schema |
+| Model persistence | `joblib` | |
+| Frontend framework | Next.js 14+ (App Router), TypeScript | |
+| UI library | MUI v6+ (`@mui/material`, `@mui/x-charts`, `@mui/x-data-grid`) | **Tailwind excluded** — do not add it |
+| Containerization | Docker + Docker Compose | 2 services: `model-service`, `web` |
+| Package managers | `pip` (backend), `npm` (frontend) | |
+
+---
+
+## 3. Repository Structure
+
+```
+upliftiq/
+├── docker-compose.yml
+├── model-service/
+│   ├── app/
+│   │   ├── main.py                # FastAPI app entrypoint
+│   │   ├── routers/
+│   │   │   ├── benchmark.py       # POST /benchmark
+│   │   │   ├── score.py           # POST /score
+│   │   │   ├── decision.py        # POST /decision
+│   │   │   └── export.py          # GET /export/{run_id}
+│   │   ├── core/
+│   │   │   ├── datasets.py        # sklift loader wrappers + fallback cache
+│   │   │   ├── learners.py        # S/T/X-learner + causal forest fitting
+│   │   │   ├── evaluation.py      # Qini, AUUC, segment breakdown
+│   │   │   └── decision_engine.py # budget-constrained ranking
+│   │   └── models/                # persisted joblib artifacts (gitignored)
+│   ├── data_fallback/             # cached small dataset snapshot (FR-A1 fallback)
+│   ├── requirements.txt
+│   └── Dockerfile
+├── web/
+│   ├── app/
+│   │   ├── page.tsx                       # dataset selection / home
+│   │   ├── benchmark/page.tsx             # model comparison + Qini charts
+│   │   ├── simulator/page.tsx             # budget slider + target list
+│   │   └── layout.tsx
+│   ├── components/
+│   │   ├── QiniChart.tsx
+│   │   ├── SegmentBreakdown.tsx
+│   │   ├── BudgetSlider.tsx
+│   │   └── TargetListGrid.tsx
+│   ├── theme/
+│   │   └── theme.ts                       # MUI theme (see §10)
+│   ├── package.json
+│   └── Dockerfile
+└── UpliftIQ_00/01/02_*.md          # this spec package
 ```
 
 ---
 
-## 2. Technology Stack
+## 4. Data Pipeline & Benchmark Design (Train Plane)
 
-| Layer | Choice | Rationale |
-|-------|--------|-----------|
-| Modeling | **causalml** (Uber), **EconML** (Microsoft), **scikit-uplift** | meta-learners, causal forest, Qini/AUUC, dataset loaders |
-| Base learners | scikit-learn / LightGBM / XGBoost | inside the meta-learners |
-| Data engine | **DuckDB** over **Parquet** | owner-familiar, scales to Criteo (~14M rows) on one machine |
-| Experiment tracking | **MLflow** (optional) | log metrics/artifacts per model×dataset |
-| Interpretability | **SHAP** | explain uplift drivers (FR-C5) |
-| Serving | **FastAPI** | scoring + decision endpoints |
-| Frontend | **Next.js + React + TypeScript + MUI (Material UI) v6+** | PWA, owner stack; Material aligns with the Gemini/Material aesthetic |
-| UI components | **MUI core** (`Slider`, `Card`, `AppBar`, `Switch`, `TextField`) + **MUI X** (`DataGrid` for target lists) | beautiful, accessible, low-effort components |
-| Charts | **MUI X Charts** (`LineChart`, `BarChart`) — Recharts as fallback | Qini & uplift curves, profit lines, visually consistent with MUI |
-| Dashboard | **Power BI** | executive reporting (owner skill) |
-| Packaging | **Docker + docker-compose** | reproducible demo |
-| Hosting (demo) | Render / Railway / Fly.io / VPS | reachable for reviewers |
+### 4.1 Loading
+Wrap each `sklift.datasets.fetch_*` call in `core/datasets.py`:
 
----
+```python
+from sklift.datasets import fetch_hillstrom, fetch_criteo, fetch_lenta, fetch_x5
 
-## 3. Component Design
-
-### 3.1 Data Ingestion & Schema (FR-A1)
-Normalise every dataset to a common frame:
-
-| column | meaning |
-|--------|---------|
-| `f_*` | feature columns |
-| `treatment` | binary (1 = treated/contacted, 0 = control) |
-| `outcome` | binary primary label (e.g., `visit`/`conversion`) |
-| `outcome_value` | optional numeric (e.g., `spend`) for profit |
-
-- **Hillstrom:** map the 3-arm `segment` to binary (e.g., treated = received any email, or run per-arm); outcome = `visit`/`conversion`; value = `spend`.
-- **Criteo:** features `f0–f11`; `treatment`; outcome = `visit`/`conversion`.
-- Store as Parquet; query/feature-prep via DuckDB.
-
-### 3.2 Experiment Validation (FR-A2)
-Before modeling, verify randomization quality: standardized mean differences of features between treatment and control; report a balance table. (For randomized data these should be near zero; flag any drift.)
-
-### 3.3 Uplift Models (FR-A3, A4)
-Implement and benchmark, all behind a common interface `fit(X, T, Y)` / `predict_uplift(X)`:
-
-- **S-learner** — single model with `T` as a feature; uplift = f(X, 1) − f(X, 0).
-- **T-learner** — separate treated/control models; uplift = μ₁(X) − μ₀(X).
-- **X-learner** — impute individual effects, model them, combine via propensity weighting (handles treatment imbalance — important for Criteo's 0.85 treatment ratio).
-- **Causal Forest** (EconML `CausalForestDML`) and/or **R-learner** — advanced comparison.
-
-Use `causalml` / `EconML` implementations; do not hand-roll unless for a baseline.
-
-### 3.4 Evaluation (FR-A5) — get this right
-Uplift cannot be scored by accuracy (no individual ground truth). Compute on a **randomized holdout**:
-
-- **Qini curve + Qini coefficient**
-- **Uplift curve + AUUC** (Area Under Uplift Curve)
-- **Uplift-by-decile** table (rank by predicted uplift; show actual incremental response per decile)
-- **Calibration** of predicted vs observed uplift by bin
-
-`scikit-uplift` provides `qini_auc_score`, `uplift_auc_score`, `uplift_by_percentile`, and plotting helpers. Emit a versioned, seeded **evaluation report** (markdown + figures) per model×dataset.
-
-### 3.5 Decision Layer (FR-B1–B4)
-Pure functions over the scored holdout:
-
-```
-select(budget_N, cost_per_contact, value_per_conversion):
-    rank customers by predicted uplift (desc)
-    take top-N within budget
-    expected_incremental_conversions = Σ uplift_i over selected
-    expected_incremental_profit =
-        expected_incremental_conversions * value_per_conversion
-        − N * cost_per_contact
-    compare vs baselines:
-        random_targeting, propensity_targeting (model P(Y=1))
-    return selection, segments, profit, baseline_profits, qini
+LOADERS = {
+    "hillstrom": lambda: fetch_hillstrom(target_col="visit", return_X_y_t=True),
+    "criteo":    lambda: fetch_criteo(target_col="conversion", treatment_col="treatment",
+                                       percent10=True, return_X_y_t=True),
+    "lenta":     lambda: fetch_lenta(return_X_y_t=True),
+    "x5":        lambda: fetch_x5(),  # multi-table; needs custom feature assembly
+}
 ```
 
-Segment assignment: Persuadable (uplift > +ε), Sleeping Dog (uplift < −ε), and Sure Thing / Lost Cause split by predicted base rate.
+### 4.2 Offline fallback (NFR-5, Risk mitigation in `01_REQUIREMENT_SPEC.md` §11)
+On first successful fetch, cache the raw dataframe to `data_fallback/<name>.parquet`. On subsequent app startup, check the cache before calling the network loader — this satisfies "single `docker compose up`, no manual steps" even if the sandbox has no internet after the initial build.
 
-### 3.6 Serving API (FR-C1–C3)
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `POST` | `/api/score` | features → `{uplift, segment, base_rate}` |
-| `POST` | `/api/simulate` | `{budget, cost, value, dataset}` → selection + incremental profit + baselines + qini points |
-| `POST` | `/api/batch` | file/ref → ranked target list, CSV UTF-8 BOM |
-| `GET`  | `/api/metrics` | benchmark metrics per model×dataset (for dashboard) |
-| `GET`  | `/api/health` | liveness |
+### 4.3 Splitting
+Stratified train/holdout split (default 70/30) preserving the treatment/control ratio, `random_state` fixed and logged (`FR-A2`, `NFR-1`).
 
-The API loads a **precomputed score table** for the demo dataset so `/simulate` is instant (NFR-2); `/score` uses the live model artifact for ad-hoc inputs.
+### 4.4 Diagnostics
+Before modeling, compute and return: n_train, n_holdout, treatment/control ratio, base conversion rate per arm (`FR-A3`).
 
 ---
 
-## 4. Model & Artifact Storage
+## 5. Modeling Module (`core/learners.py`)
 
-- Trained models serialised under `models/{dataset}/{learner}.pkl` (+ MLflow run if enabled).
-- A `scores/{dataset}.parquet` table: `{id, uplift, base_rate, segment, T, Y, value}` used by the simulator.
-- A `reports/{dataset}/` folder: metrics JSON + Qini/uplift PNGs + the markdown evaluation report.
+Fit, at minimum, these four estimators per dataset (`FR-B1`):
 
----
+| Learner | Approach |
+|---|---|
+| **S-learner** | Single model with treatment as a feature; uplift = f(x,1) − f(x,0) |
+| **T-learner** | Two separate models (treated-only, control-only); uplift = model difference |
+| **X-learner** | T-learner + cross-imputed pseudo-effects, propensity-weighted |
+| **Causal Forest** | Tree-ensemble estimator of heterogeneous treatment effects |
 
-## 5. Frontend Design (Next.js PWA + MUI)
-
-All components are composed from **MUI** (see §8 for the theme + component mapping). Wrap the app in `ThemeProvider` + `CssBaseline`.
-
-### 5.1 Screens / components
-- **SimulatorScreen** (hero, UX-1): `BudgetSlider` (MUI `Slider`), `CostInput`/`ValueInput` (MUI `TextField`), `DatasetPicker` (`ToggleButtonGroup`) at top; results below.
-- **ProfitPanel** (UX-2): big number — expected incremental profit — plus an uplift-vs-baseline line chart that animates as the slider moves.
-- **SegmentBreakdown** (UX-3): four-segment bar/donut with counts.
-- **QiniChart** (UX-4): Qini/uplift curve, hover for cumulative gain.
-- **BaselineToggle** (UX-5): uplift vs propensity vs random, always comparable.
-- **ExportButton** (UX-6): ranked CSV.
-- **ThemeToggle** (UX-7).
-
-### 5.2 PWA (NFR-1)
-- `manifest.webmanifest`: `display: standalone`, theme_color `#e86020`, maskable icons.
-- Service worker caches the app shell; network-first for `/api/*`.
-- Respect iOS safe-area insets; test Add-to-Home-Screen on Safari.
+Log hyperparameters and the random seed for every fit to a `run_manifest.json` alongside the persisted model (`FR-B2`). Persist each fitted model via `joblib.dump` so `/score` can load without retraining (`FR-B3`).
 
 ---
 
-## 6. (reserved)
+## 6. Evaluation Module (`core/evaluation.py`)
 
-## 7. (reserved)
+- Compute **Qini curve** and **Qini coefficient** and **AUUC** using `sklift.metrics` (`qini_auc_score`, `uplift_at_k`, etc.) — do not hand-roll these; use the library's validated implementations so results are directly comparable to published uplift-modeling literature (`FR-D2`, `AC-6`).
+- Compute the **four-segment breakdown** (Persuadable / Sure Thing / Lost Cause / Sleeping Dog) at a configurable decile threshold, using estimated uplift score combined with observed outcome on the holdout set (`FR-D3`).
+- Rank all fitted meta-learners by AUUC; expose the winner explicitly in the API response (`FR-D4`).
+- **Guardrail:** the evaluation response schema must not include an `accuracy` or `auc` field as a top-level/primary result. If included at all, it must be nested under a clearly labeled `secondary_diagnostics` object (`FR-D1`, `AC-5`).
 
 ---
 
-## 8. Design System — MUI (Material UI) (binding — UX, NFR-7, `01` §7/§8)
+## 7. Decision Layer (`core/decision_engine.py`)
 
-The UI is built with **MUI**. All styling flows from a **single MUI theme** via `ThemeProvider`; use the `sx` prop and `styled()` for layout — **do not add Tailwind** (avoid a second, conflicting styling system). MUI's Material foundation matches the Gemini/Material aesthetic the project targets.
+Given `budget`, `cost_per_contact`, and the winning model's uplift scores on the holdout set:
 
-### 8.1 The theme (single source of truth)
-Define one theme with light/dark color schemes. Recommended: MUI v6+ CSS-variables theming (`cssVariables: true`, `colorSchemes`) so dark mode is a class toggle with no flicker.
+1. Rank customers descending by predicted uplift.
+2. Greedily select customers until the budget is exhausted (`floor(budget / cost_per_contact)` customers) — this is a hard cap, never exceeded (`FR-C1`, `AC-3`).
+3. Compute expected incremental profit for this uplift-ranked selection.
+4. Repeat the same budget-constrained selection using a naive propensity/response ranking (plain classifier, no causal adjustment) as the baseline comparator.
+5. Return both target lists plus the profit gap between them — this *is* the thesis headline number (`FR-C2`, `AC-4`).
+
+---
+
+## 8. Backend API (FastAPI)
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/datasets` | GET | List available datasets + cached status |
+| `/benchmark` | POST | `{dataset, seed?}` → fits all meta-learners, returns Qini/AUUC table + winner |
+| `/score` | POST | `{dataset, model}` → per-record uplift scores on holdout |
+| `/decision` | POST | `{dataset, model, budget, cost_per_contact}` → target list + profit-gap result |
+| `/export/{run_id}` | GET | Returns UTF-8-BOM CSV of the target list (`FR-C3`) or a summary PDF/report bundle (`FR-F1`) |
+
+All responses validated against Pydantic schemas; OpenAPI docs auto-served at `/docs`.
+
+---
+
+## 9. Frontend App (Next.js + MUI)
+
+Three screens map directly to the FR-E requirements:
+
+1. **Home / dataset select** (`app/page.tsx`) — dataset cards with diagnostics from `/datasets`.
+2. **Benchmark view** (`app/benchmark/page.tsx`) — Qini curves per model (MUI X Charts `LineChart`), AUUC comparison table, segment breakdown (MUI X Charts `BarChart`), winning model highlighted.
+3. **Simulator** (`app/simulator/page.tsx`) — budget slider (`FR-E2`) driving a live re-call to `/decision`; target list rendered in MUI X `DataGrid` (`FR-E3`) with a CSV export button wired to `/export/{run_id}`.
+
+---
+
+## 10. Design System
+
+### 10.1 Brand & Accessibility
+- Primary: `#e86020` — large surfaces, icons, accents, chart highlight color only.
+- Primary-text-safe: `#9c3614` — required for any small body text on a white/light background (raw `#e86020` fails WCAG AA at ~3.2:1 contrast for small text) (`NFR-3`, `AC-10`).
+- Typography: declared stack `"Roboto", "Inter", "Noto Sans Thai", sans-serif` — Google Sans is proprietary/undistributable, do not attempt to load it.
+
+### 10.2 MUI Theme (`theme/theme.ts`)
 
 ```ts
-// theme.ts
-import { createTheme } from "@mui/material/styles";
+import { createTheme } from '@mui/material/styles';
 
 export const theme = createTheme({
-  cssVariables: { colorSchemeSelector: "data" },
+  cssVariables: { colorSchemeSelector: 'class' },
   colorSchemes: {
-    light: {
-      palette: {
-        primary: {
-          main: "#e86020",        // KMITL warm orange — slider fill, primary btn, uplift line
-          dark: "#b8431a",        // hover/press
-          light: "#fce9df",       // tint / selected background
-          contrastText: "#ffffff",
-        },
-        text: { primary: "#1b1b1f", secondary: "#5f6368" },
-        background: { default: "#ffffff", paper: "#f7f7f8" },
-        divider: "#e3e3e6",
-        success: { main: "#1e8e3e" },
-        warning: { main: "#f29900" },
-        error:   { main: "#d93025" },
-      },
-    },
-    dark: {
-      palette: {
-        primary: { main: "#ff7a45", dark: "#e86020", light: "#3a2417", contrastText: "#1b1b1f" },
-        text: { primary: "#e6e6e9", secondary: "#a3a3ab" },
-        background: { default: "#131316", paper: "#1c1c20" },
-        divider: "#34343a",
-      },
-    },
+    light: { palette: { primary: { main: '#e86020' }, text: { primary: '#1a1a1a' } } },
+    dark:  { palette: { primary: { main: '#e86020' }, background: { default: '#121212' } } },
   },
-  shape: { borderRadius: 16 },            // soft, Gemini-like; cards use 16–24
   typography: {
-    fontFamily: [
-      '"Google Sans"','"Google Sans Text"','"Roboto"','"Inter"',
-      "system-ui",'"Noto Sans Thai"',"sans-serif",
-    ].join(","),
-    h1: { fontWeight: 600 }, h2: { fontWeight: 600 },
-    button: { textTransform: "none", fontWeight: 600 }, // no ALL-CAPS buttons
+    fontFamily: '"Roboto", "Inter", "Noto Sans Thai", sans-serif',
   },
+  shape: { borderRadius: 16 },
   components: {
-    MuiButton:  { defaultProps: { disableElevation: true },
-                  styleOverrides: { root: { borderRadius: 999 } } }, // pill buttons
-    MuiCard:    { styleOverrides: { root: { borderRadius: 20 } } },
-    MuiPaper:   { styleOverrides: { rounded: { borderRadius: 20 } } },
-    MuiSlider:  { styleOverrides: { thumb: { width: 22, height: 22 } } }, // big touch target
-    MuiChip:    { styleOverrides: { root: { borderRadius: 999 } } },
-    MuiTextField:{ defaultProps: { variant: "outlined", size: "medium" } },
+    MuiButton: { styleOverrides: { root: { borderRadius: 999 } } },       // pill buttons
+    MuiCard:   { styleOverrides: { root: { borderRadius: 20 } } },        // rounded cards
+    MuiSlider: { styleOverrides: { thumb: { width: 24, height: 24 } } }, // large slider thumb
   },
 });
 ```
 
-### 8.2 Chart series colours (for MUI X Charts)
-```ts
-export const series = {
-  uplift:   "#e86020",  // brand = the hero line (always on top of baseline)
-  baseline: "#5f6368",  // propensity targeting (neutral grey)
-  random:   "#b0b3b8",  // random targeting
-};
+### 10.3 Component Mapping
+
+| UI need | MUI component |
+|---|---|
+| Qini curve, uplift-by-decile bars | `@mui/x-charts` `LineChart`, `BarChart` |
+| Target list table | `@mui/x-data-grid` `DataGrid` |
+| Budget input | `@mui/material` `Slider` (custom thumb per §10.2) |
+| Dataset/model cards | `@mui/material` `Card` |
+
+Do **not** introduce Tailwind — it was explicitly excluded to avoid two competing styling systems.
+
+---
+
+## 11. Deployment
+
+`docker-compose.yml` — two services:
+
+```yaml
+services:
+  model-service:
+    build: ./model-service
+    ports: ["8000:8000"]
+    volumes: ["./model-service/data_fallback:/app/data_fallback"]
+  web:
+    build: ./web
+    ports: ["3000:3000"]
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on: [model-service]
 ```
 
-### 8.3 Contrast rule (NFR-7) — still binding under MUI
-`#e86020` on white ≈ **3.2:1** → fails AA for small body text. Therefore:
-- Use `primary.main` for **buttons (white text on orange fill — passes), slider/track fills, icons, chart lines, large headings**.
-- For **small orange TEXT on a white/paper background**, do **not** use `primary.main`; use a darkened `#9c3614` (define as `primary.dark`-adjacent or a custom `palette.brandText`).
-- On dark surfaces the lifted `#ff7a45` is used automatically by the dark scheme.
-- Enforce with an automated contrast check in CI.
-
-### 8.4 Component mapping (build the simulator from MUI)
-| UI element | MUI component |
-|------------|---------------|
-| Budget control (hero) | `Slider` (with `valueLabelDisplay`) |
-| Cost / value inputs | `TextField` (number, with adornments) |
-| Dataset picker | `ToggleButtonGroup` or `Select` |
-| Result panels | `Card` / `Paper` with `Stack` + `Grid` |
-| Incremental-profit headline | `Typography variant="h2"` in `primary.main` |
-| Segment counts | `Chip` set + `MuiX BarChart` |
-| Uplift-vs-baseline & Qini | `MuiX LineChart` (series coloured per §8.2) |
-| Ranked target list | `MuiX DataGrid` (sortable, exportable) |
-| Light/dark toggle | `Switch` + `useColorScheme()` |
-| Top bar | `AppBar` + `Toolbar` |
-
-### 8.5 Gemini-style feel
-Generous spacing (`theme.spacing` 1.5–3), rounded `Card`s, soft elevation, no ALL-CAPS buttons, the **uplift line in brand orange sitting visibly above the grey baseline**. Animate the profit number/chart on slider change with a short ease-out; respect `prefers-reduced-motion`.
-
-> Setup: wrap the app in `<ThemeProvider theme={theme}><CssBaseline />…`. Use `InitColorSchemeScript` (Next.js App Router) to prevent dark-mode flash. The coding agent should also read `/mnt/skills/public/frontend-design/SKILL.md` before building UI.
+`docker compose up --build` must bring up the full stack from a clean clone with zero manual steps (`NFR-5`, `AC-9`).
 
 ---
 
-## 9. (reserved)
+## 12. Testing & Validation
+
+- **Unit:** each meta-learner's uplift output shape/range; Qini/AUUC computation matches `sklift`'s reference implementation on a toy synthetic dataset with a known ground-truth uplift.
+- **Reproducibility test:** run the full benchmark twice with the same seed; assert identical model ranking and near-identical AUUC values (`AC-2`).
+- **Contract test:** assert the evaluation API response schema contains no top-level `accuracy`/`auc` field (`AC-5`).
+- **E2E:** budget slider → `/decision` → target list length never exceeds `floor(budget / cost_per_contact)` (`AC-3`).
 
 ---
 
-## 10. Train Plane — THESIS CORE (§3.3–3.5 detailed pipeline)
+## 13. MVP Build Order
 
-A scripted, seeded pipeline. One command runs: ingest → balance check → train all learners → evaluate → select best → persist scores/report, per dataset.
-
-### 10.1 Pipeline stages
-1. **Load** via `sklift.datasets.fetch_*` (Hillstrom, then Criteo). Cache to Parquet.
-2. **Split** train/holdout with fixed seed, stratified by treatment.
-3. **Balance report** (FR-A2).
-4. **Train** S-, T-, X-learner (causalml/sklift) + Causal Forest (EconML) on identical features.
-5. **Evaluate** on holdout: Qini coefficient, AUUC, uplift-by-decile, calibration (FR-A5).
-6. **Select** best by Qini (with AUUC as tie-breaker); persist artifact + score table.
-7. **Decision benchmark** (FR-B): sweep budget; compute incremental profit for uplift vs propensity vs random; store the profit-vs-baseline curve (the headline, AC-3).
-8. **Report**: write `reports/{dataset}/report.md` + figures + metrics JSON.
-
-### 10.2 Headline result (AC-3)
-The thesis's central exhibit: at a fixed budget, **incremental profit from uplift targeting minus incremental profit from propensity targeting** — quantified, on ≥ 2 datasets. Plus the uplift-by-decile table showing correct ranking, and Qini/AUUC across learners.
-
-### 10.3 Generalisation (AC-4)
-Re-run the entire pipeline on Criteo (use DuckDB chunking / a stratified subsample for development, full run for final numbers). Optionally add Lenta/X5 for a third point.
-
-### 10.4 Interpretability (FR-C5, stretch)
-SHAP on the uplift model to rank which features drive persuadability; feed a short LLM-generated plain-language segment explainer if implemented.
+1. `core/datasets.py` — Hillstrom loader + fallback cache
+2. `core/learners.py` — S/T/X-learner + causal forest fitting on Hillstrom
+3. `core/evaluation.py` — Qini/AUUC + segment breakdown, validated against `sklift` reference values
+4. `/benchmark` endpoint wired to the above
+5. `core/decision_engine.py` + `/decision` endpoint
+6. Frontend: dataset select → benchmark view → simulator, in that order
+7. CSV export (`/export`)
+8. Second dataset (Criteo or Lenta) added to prove generalization
+9. Docker Compose one-command demo
+10. PWA installability pass + WCAG contrast audit
 
 ---
 
-## 11. Reproducibility & Honesty (FR-D1–D3, NFR-4/8)
-- Single `--seed`; pinned library versions; one-command `make all` / `python -m pipeline.run`.
-- Report **always** includes the baselines and a note on why accuracy/AUC are not used for uplift.
-- All profit figures regenerate from the seeded pipeline.
+## 14. Appendix — Key JSON Contracts
 
----
-
-## 12. Deployment & DevOps (NFR-5)
-- `docker-compose.yml`: `web` (Next.js), `api` (FastAPI + model artifacts), optional `train` (one-shot pipeline job).
-- One command: `docker compose up` → loads precomputed scores → simulator reachable.
-- `/api/health` for demo stability; backend deployable to Render/Railway/Fly.io.
-
----
-
-## 13. Implementation Phases (build order)
-
-**Phase 0 — Foundation:** repo scaffold, docker-compose, `sklift` data loaders, Parquet/DuckDB layer, design tokens.
-**Phase 1 — Modeling core (THESIS):** S/T/X-learner + evaluation (Qini/AUUC/decile/calibration) on **Hillstrom**; seeded report. → AC-1/2/5.
-**Phase 2 — Decision layer:** budget-constrained selection, incremental profit, baseline comparison, segments. → AC-3.
-**Phase 3 — Serving + Simulator:** FastAPI `/score`/`/simulate`/`/batch`; Next.js simulator with live profit-vs-baseline; PWA. → AC-6/7/8.
-**Phase 4 — Scale + dashboard:** re-run on **Criteo**; Power BI dashboard. → AC-4.
-**Phase 5 — Stretch:** Causal Forest/R-learner deep-dive, Lenta/X5, SHAP + LLM explainer.
-
----
-
-## 14. Testing Strategy
-- **Pipeline:** seeded run reproduces identical metrics (AC-5); asserts top deciles > bottom deciles in actual incremental response (AC-2).
-- **Decision layer:** unit tests that uplift selection ≥ random/propensity profit on the holdout (AC-3) for the demo dataset.
-- **Metric correctness:** cross-check Qini/AUUC against `scikit-uplift` reference values on Hillstrom.
-- **API:** `/simulate` returns consistent numbers vs the offline pipeline for the same inputs.
-- **Scale:** Criteo pipeline completes within memory via DuckDB chunking (NFR-3).
-- **PWA/UI:** Lighthouse PWA pass; mobile Add-to-Home-Screen; contrast check enforcing the `#e86020` rule (NFR-7).
-
----
-
-## 15. Repository Structure
-```
-upliftiq/
-├─ docker-compose.yml
-├─ .env.example
-├─ pipeline/                    # TRAIN PLANE (thesis core)
-│  ├─ data.py (sklift loaders → parquet, duckdb)
-│  ├─ balance.py (FR-A2)
-│  ├─ models.py (S/T/X-learner, causal forest)
-│  ├─ evaluate.py (qini, auuc, decile, calibration)
-│  ├─ decision.py (budget selection, incremental profit, baselines)
-│  └─ run.py (one-command orchestrator, --seed)
-├─ api/                         # SERVE PLANE
-│  ├─ main.py (/score /simulate /batch /metrics /health)
-│  └─ loaders.py (model artifact + score table)
-├─ web/                         # EXPERIENCE PLANE (Next.js PWA)
-│  ├─ app/ (SimulatorScreen)
-│  ├─ components/ (BudgetSlider, ProfitPanel, SegmentBreakdown, QiniChart, ExportButton)
-│  ├─ theme.ts                  # §8 MUI theme (single source of truth)
-│  ├─ providers.tsx             # ThemeProvider + CssBaseline + color scheme
-│  └─ public/ (manifest, icons, sw)
-├─ models/  scores/  reports/   # artifacts, score tables, eval reports
-├─ powerbi/                     # dashboard + exports (UTF-8 BOM)
-└─ docs/
-   ├─ UpliftIQ_01_REQUIREMENT_SPEC.md
-   └─ UpliftIQ_02_SOFTWARE_SPEC.md
+**`POST /benchmark` response (abridged):**
+```json
+{
+  "dataset": "hillstrom",
+  "seed": 42,
+  "diagnostics": { "n_train": 44800, "n_holdout": 19200, "base_conversion_rate": 0.0906 },
+  "models": [
+    { "name": "x_learner", "qini_coefficient": 0.081, "auuc": 0.074,
+      "secondary_diagnostics": { "auc_note": "not used for model selection" } },
+    { "name": "t_learner", "qini_coefficient": 0.063, "auuc": 0.058 }
+  ],
+  "winner": "x_learner"
+}
 ```
 
----
-
-## 16. Environment Variables (`.env.example`)
+**`POST /decision` response (abridged):**
+```json
+{
+  "budget": 5000, "cost_per_contact": 2.5, "n_targeted": 2000,
+  "uplift_ranked_profit": 18320.5,
+  "propensity_ranked_profit": 12110.0,
+  "profit_gap": 6210.5,
+  "target_list_export_url": "/export/run_20260702_1"
+}
 ```
-SEED=42
-DATA_HOME=./.uplift_data          # sklift cache
-DEFAULT_DATASET=hillstrom
-LLM_API_KEY=                      # optional, explainer only
-APP_ORIGIN=
-```
-
----
-
-## 17. Traceability (requirement → component)
-| Requirement | Built in |
-|-------------|----------|
-| FR-A1–A2 (ingest, balance) | §3.1, §3.2, pipeline/data,balance |
-| FR-A3–A4 (meta-learners) | §3.3, pipeline/models |
-| FR-A5–A7 (evaluation, artifact) | §3.4, §10, pipeline/evaluate |
-| FR-B1–B4 (decision) | §3.5, pipeline/decision |
-| FR-C1–C3 (API) | §3.6, api/ |
-| FR-C2 (simulator) | §5, web/ |
-| FR-C4 (dashboard) | §10, powerbi/ |
-| FR-C5 (explainer) | §10.4 |
-| FR-D1–D3 (honesty) | §11 |
-| UX/design | §5, §8 |
-| NFR-1 (PWA) | §5.2, §12 |
-| NFR-3 (scale) | §10.3 |
-| NFR-7 (contrast) | §8.1 |
 
 ---
 

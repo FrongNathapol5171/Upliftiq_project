@@ -3,14 +3,17 @@ import * as React from "react";
 import { Card, CardContent, Stack, Typography, Box, Chip } from "@mui/material";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import { LineChart } from "@mui/x-charts/LineChart";
-import { series } from "@/theme";
+import { policySeries } from "@/theme";
+import { useResolvedMode } from "@/lib/useResolvedMode";
 import type { SimulateResponse } from "@/lib/api";
 
 const money = (n: number) =>
   n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
 export default function ProfitPanel({ sim }: { sim: SimulateResponse | null }) {
+  const mode = useResolvedMode();
   if (!sim) return null;
+  const colors = policySeries(mode);
   const sweep = sim.profit_sweep;
   const x = sweep.map((p) => p.budget);
 
@@ -24,7 +27,7 @@ export default function ProfitPanel({ sim }: { sim: SimulateResponse | null }) {
           </Typography>
         </Stack>
 
-        {/* The money-on-screen headline (UX-2). */}
+        {/* The money-on-screen headline. */}
         <Typography
           variant="h2"
           color="primary.main"
@@ -46,19 +49,23 @@ export default function ProfitPanel({ sim }: { sim: SimulateResponse | null }) {
           />
         </Stack>
 
-        {/* Uplift line visibly above the baselines (UX-2/5). */}
+        {/* Uplift hero line above the baselines; random is a dashed reference. */}
         <Box sx={{ mt: 2 }}>
           <LineChart
             height={300}
             xAxis={[{ data: x, label: "Budget (customers contacted)" }]}
-            yAxis={[{ label: "Incremental profit" }]}
+            yAxis={[{ valueFormatter: (v: number) => `$${(v / 1000).toLocaleString()}k` }]}
             series={[
-              { data: sweep.map((p) => p.uplift), label: "Uplift", color: series.uplift, showMark: false, curve: "monotoneX" },
-              { data: sweep.map((p) => p.propensity), label: "Propensity", color: series.baseline, showMark: false, curve: "monotoneX" },
-              { data: sweep.map((p) => p.random), label: "Random", color: series.random, showMark: false, curve: "monotoneX" },
+              { id: "uplift", data: sweep.map((p) => p.uplift), label: "Uplift", color: colors.uplift, showMark: false, curve: "monotoneX" },
+              { id: "propensity", data: sweep.map((p) => p.propensity), label: "Propensity", color: colors.propensity, showMark: false, curve: "monotoneX" },
+              { id: "random", data: sweep.map((p) => p.random), label: "Random", color: colors.random, showMark: false, curve: "monotoneX" },
             ]}
             grid={{ horizontal: true }}
-            margin={{ left: 70 }}
+            margin={{ left: 60 }}
+            sx={{
+              "& .MuiLineElement-series-uplift": { strokeWidth: 2.5 },
+              "& .MuiLineElement-series-random": { strokeDasharray: "6 4", strokeWidth: 1.5 },
+            }}
           />
         </Box>
       </CardContent>

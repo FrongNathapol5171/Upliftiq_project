@@ -2,7 +2,8 @@
 import * as React from "react";
 import { Card, CardContent, Stack, Typography, Chip, Box, Tooltip } from "@mui/material";
 import { BarChart } from "@mui/x-charts/BarChart";
-import { SEGMENT_COLORS } from "@/theme";
+import { segmentColors } from "@/theme";
+import { useResolvedMode } from "@/lib/useResolvedMode";
 import type { Segments } from "@/lib/api";
 
 const ORDER = ["Persuadable", "Sure Thing", "Lost Cause", "Sleeping Dog"];
@@ -13,6 +14,15 @@ const HINTS: Record<string, string> = {
   "Sleeping Dog": "Contact lowers conversion — never target.",
 };
 
+function SegmentDot({ color }: { color: string }) {
+  return (
+    <Box
+      component="span"
+      sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: color, display: "inline-block" }}
+    />
+  );
+}
+
 export default function SegmentBreakdown({
   total,
   selected,
@@ -20,23 +30,25 @@ export default function SegmentBreakdown({
   total: Segments;
   selected: Segments;
 }) {
+  const mode = useResolvedMode();
+  const colors = segmentColors(mode);
   const data = ORDER.map((s) => total[s] ?? 0);
+
   return (
     <Card elevation={0} sx={{ border: 1, borderColor: "divider", height: "100%" }}>
       <CardContent>
         <Typography variant="h6" gutterBottom>
           Audience segments
         </Typography>
+        {/* Counts as text with a colored identity dot (never white-on-series). */}
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
           {ORDER.map((s) => (
             <Tooltip key={s} title={HINTS[s]}>
               <Chip
+                variant="outlined"
+                icon={<SegmentDot color={colors[s]} />}
                 label={`${s}: ${(total[s] ?? 0).toLocaleString()}`}
-                sx={{
-                  bgcolor: SEGMENT_COLORS[s],
-                  color: s === "Sure Thing" || s === "Lost Cause" ? "#fff" : "#fff",
-                  fontWeight: 600,
-                }}
+                sx={{ fontWeight: 600, "& .MuiChip-icon": { ml: 1 } }}
               />
             </Tooltip>
           ))}
@@ -44,16 +56,18 @@ export default function SegmentBreakdown({
         <Box>
           <BarChart
             height={260}
-            xAxis={[{ data: ORDER, scaleType: "band" }]}
-            series={[
+            xAxis={[
               {
-                data,
-                label: "Customers",
-                color: "#e86020",
+                data: ORDER,
+                scaleType: "band",
+                colorMap: { type: "ordinal", values: ORDER, colors: ORDER.map((s) => colors[s]) },
               },
             ]}
-            colors={ORDER.map((s) => SEGMENT_COLORS[s])}
+            series={[{ data, label: "Customers" }]}
+            barLabel="value"
+            slotProps={{ legend: { hidden: true } }}
             margin={{ left: 70 }}
+            sx={{ "& .MuiBarLabel-root": { fontWeight: 600 } }}
           />
         </Box>
         <Typography variant="caption" color="text.secondary">

@@ -123,12 +123,20 @@ def run(dataset: str = None, seed: int = None, learners: list[str] = None) -> di
     # 9. Assemble metrics + qini points for the best model.
     qini_pts = evaluate.qini_points(Yho, best_uplift, Tho)
 
+    best_deciles = results[best]["deciles"]
     metrics_json = {
         "dataset": dataset,
         "seed": seed,
         "n_rows": int(b.n),
         "n_holdout": int(len(ho)),
+        "outcome_rate": float(b.outcome.mean()),
         "balance": bal,
+        # Best-model curves for the benchmark view (charts read metrics only).
+        "deciles": [
+            {"percentile": str(r["percentile"]), "uplift": float(r["uplift"])}
+            for _, r in best_deciles.iterrows()
+        ],
+        "qini_points": qini_pts["qini"],
         "best_learner": best,
         "learners": {k: results[k]["metrics"] for k in results},
         "decision_demo": {

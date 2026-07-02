@@ -5,7 +5,7 @@
 
 - **Rows:** 64,000 (holdout 19,200)
 - **Best learner (by Qini):** **s_learner**
-- **Elapsed:** 5.0s
+- **Elapsed:** 5.6s
 
 ## 1. Experiment balance (FR-A2)
 Treatment ratio **0.667** · max |SMD|

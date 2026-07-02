@@ -55,19 +55,26 @@ export const theme = createTheme({
   },
 });
 
-// Chart series colours (spec §8.2). Uplift = brand, always on top.
-export const series = {
-  uplift: "#e86020",
-  baseline: "#5f6368",
-  random: "#b0b3b8",
-};
+// ── Chart color system (dataviz-validated, per mode) ───────────────────────
+// Policy lines: uplift = brand hero, propensity = blue categorical, random =
+// muted DASHED reference line (dash carries identity, not color alone).
+// Segments: four true hues; identity is stable across modes.
+export type Mode = "light" | "dark";
 
-// Darkened brand for small orange TEXT on light surfaces (passes AA, §8.3).
+export const policySeries = (mode: Mode) => ({
+  uplift: "#e86020",
+  propensity: mode === "dark" ? "#3987e5" : "#2a78d6",
+  random: "#898781",
+});
+
+export const segmentColors = (mode: Mode): Record<string, string> => ({
+  Persuadable: "#e86020",
+  "Sure Thing": mode === "dark" ? "#3987e5" : "#2a78d6",
+  "Lost Cause": mode === "dark" ? "#c98500" : "#eda100",
+  "Sleeping Dog": mode === "dark" ? "#e66767" : "#e34948",
+});
+
+// Darkened brand for small orange TEXT on light surfaces (passes AA, spec §10.1).
 export const BRAND_TEXT = "#9c3614";
 
-export const SEGMENT_COLORS: Record<string, string> = {
-  Persuadable: "#e86020",
-  "Sure Thing": "#5f6368",
-  "Lost Cause": "#b0b3b8",
-  "Sleeping Dog": "#d93025",
-};
+export const SIDEBAR_WIDTH = 264;

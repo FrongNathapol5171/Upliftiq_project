@@ -30,6 +30,46 @@ export interface HealthResponse {
   gemini: boolean;
 }
 
+export interface LearnerMetrics {
+  qini: number;
+  auuc: number;
+  top_decile_uplift: number;
+  bottom_decile_uplift: number;
+  ranks_correctly: boolean;
+}
+
+export interface MetricsResponse {
+  dataset: string;
+  seed: number;
+  n_rows: number;
+  n_holdout: number;
+  outcome_rate?: number;
+  balance: {
+    n_features: number;
+    n_flagged: number;
+    max_abs_smd: number;
+    mean_abs_smd: number;
+    treatment_ratio: number;
+    passed: boolean;
+  };
+  deciles?: { percentile: string; uplift: number }[];
+  qini_points?: Point[];
+  best_learner: string;
+  learners: Record<string, LearnerMetrics>;
+  decision_demo: {
+    budget: number;
+    cost_per_contact: number;
+    value_per_conversion: number;
+    uplift: PolicyResult;
+    propensity: PolicyResult;
+    random: PolicyResult;
+    profit_lift_vs_propensity: number;
+    profit_lift_vs_random: number;
+  };
+  why_not_accuracy: string;
+  elapsed_sec: number;
+}
+
 async function jpost<T>(path: string, body: unknown): Promise<T> {
   const r = await fetch(`${BASE}${path}`, {
     method: "POST",
@@ -44,8 +84,11 @@ export const api = {
   base: BASE,
   health: () => fetch(`${BASE}/api/health`).then((r) => r.json() as Promise<HealthResponse>),
   datasets: () => fetch(`${BASE}/api/datasets`).then((r) => r.json()),
-  metrics: (dataset: string) =>
-    fetch(`${BASE}/api/metrics?dataset=${dataset}`).then((r) => r.json()),
+  metrics: async (dataset: string): Promise<MetricsResponse> => {
+    const r = await fetch(`${BASE}/api/metrics?dataset=${dataset}`);
+    if (!r.ok) throw new Error(`/api/metrics → ${r.status}: ${await r.text()}`);
+    return r.json();
+  },
   simulate: (body: { budget: number; cost: number; value: number; dataset: string }) =>
     jpost<SimulateResponse>("/api/simulate", body),
   explain: (body: { segment: string; dataset: string }) =>

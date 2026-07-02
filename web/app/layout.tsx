@@ -3,7 +3,7 @@ import InitColorSchemeScript from "@mui/material/InitColorSchemeScript";
 import Providers from "./providers";
 
 export const metadata: Metadata = {
-  title: "UpliftIQ — Campaign Simulator",
+  title: "UpliftIQ — Incremental Targeting Decision Engine",
   description: "Incremental targeting decision engine. Spend budget where it creates conversions.",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "UpliftIQ" },
@@ -20,8 +20,18 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Google Sans (now served by Google Fonts) + Thai fallback. The theme
+            stack degrades to Roboto/Inter if these fail to load. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Google+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap"
+        />
+      </head>
       <body style={{ margin: 0 }}>
-        {/* Prevent dark-mode flash before hydration (spec §8). */}
+        {/* Prevent dark-mode flash before hydration. */}
         <InitColorSchemeScript attribute="data" />
         <Providers>{children}</Providers>
       </body>

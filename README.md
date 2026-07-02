@@ -21,8 +21,22 @@ Treatment Effect); the API, simulator, and dashboard make those statistics
 |---|---|---|
 | **Train** (thesis core) | `pipeline/` | ingest ▸ balance-check ▸ S/T/X/R-learners ▸ Qini/AUUC/decile/calibration ▸ pick best ▸ decision benchmark ▸ report |
 | **Serve** | `api/` | FastAPI `/score` `/simulate` `/batch` `/export` `/metrics` `/explain` `/health` |
-| **Experience** | `web/` | Next.js + MUI PWA — the live **Campaign Simulator** |
+| **Experience** | `web/` | Next.js + MUI PWA — sidebar app with **Simulator**, **Benchmark**, and **Datasets** views |
 | **Store** | `supabase/` | optional Supabase (Postgres) score store |
+
+### The web app (sidebar navigation)
+- **Simulator** — budget slider → live incremental profit vs propensity/random baselines,
+  segment mix, Qini curve, Gemini segment explainer, one-click CSV export.
+- **Benchmark** — meta-learner comparison table (Qini/AUUC, winner highlighted),
+  uplift-by-decile + Qini charts for the winning model, experiment-balance
+  diagnostics, and the embedded *"why not accuracy/AUC"* explainer (FR-D1).
+- **Datasets** — diagnostics cards per scored dataset; the sidebar's dataset
+  selector drives every page.
+
+Typography is **Google Sans** (now served by Google Fonts) with the
+`Roboto / Inter / Noto Sans Thai` fallback stack. Chart colors are validated for
+contrast + color-vision-deficiency in both light and dark modes (uplift =
+brand orange hero, propensity = blue, random = dashed reference line).
 
 ### Models (RO-2)
 - **S-learner**, **T-learner**, **X-learner** (mandatory meta-learners)

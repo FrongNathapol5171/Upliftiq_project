@@ -4,6 +4,8 @@ import { ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import { AppRouterCacheProvider } from "@mui/material-nextjs/v14-appRouter";
 import { theme } from "@/theme";
+import { DatasetProvider } from "@/lib/dataset-context";
+import AppShell from "@/components/AppShell";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   // Register the PWA service worker once on mount.
@@ -17,7 +19,9 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     <AppRouterCacheProvider options={{ key: "mui" }}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        {children}
+        <DatasetProvider>
+          <AppShell>{children}</AppShell>
+        </DatasetProvider>
       </ThemeProvider>
     </AppRouterCacheProvider>
   );
